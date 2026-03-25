@@ -1,8 +1,30 @@
 {
   "name": "rgql",
+  "version": "0.1.0",
+  "description": "AST-aware GraphQL refactoring CLI — rename types, fields, and fragments across schemas and embedded queries with full type safety",
   "module": "index.ts",
   "type": "module",
-  "private": true,
+  "bin": {
+    "rgql": "index.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Yamashou/rgql.git"
+  },
+  "keywords": [
+    "graphql",
+    "refactoring",
+    "rename",
+    "cli",
+    "ast",
+    "schema"
+  ],
+  "author": "Yamashou",
+  "license": "MIT",
+  "files": [
+    "index.ts",
+    "src/"
+  ],
   "scripts": {
     "start": "bun run index.ts",
     "test": "bun test",
