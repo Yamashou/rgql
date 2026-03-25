@@ -7,9 +7,27 @@
  *
  * @module
  */
-import type { GraphQLSchema } from "graphql";
+import type { GraphQLSchema, GraphQLNamedType } from "graphql";
 import { isObjectType, isInterfaceType } from "graphql";
 import type { InterfaceImpact } from "../types/domain";
+
+/**
+ * Checks whether a type is an ObjectType that implements a given interface and has a specific field.
+ *
+ * @postcondition Returns `true` only if the type is an ObjectType, implements `interfaceName`,
+ *                and has `fieldName` in its field map.
+ */
+function implementsInterfaceWithField(
+  candidateType: GraphQLNamedType,
+  interfaceName: string,
+  fieldName: string,
+): boolean {
+  return (
+    isObjectType(candidateType) &&
+    candidateType.getInterfaces().some((iface) => iface.name === interfaceName) &&
+    candidateType.getFields()[fieldName] != null
+  );
+}
 
 /**
  * Returns all ObjectTypes that implement the given interface and have the specified field.
@@ -23,11 +41,8 @@ function findImplementingTypesWithField(
   fieldName: string,
 ): readonly { readonly typeName: string }[] {
   return Object.entries(schema.getTypeMap())
-    .filter(
-      ([, candidateType]) =>
-        isObjectType(candidateType) &&
-        candidateType.getInterfaces().some((iface) => iface.name === interfaceName) &&
-        candidateType.getFields()[fieldName] != null,
+    .filter(([, candidateType]) =>
+      implementsInterfaceWithField(candidateType, interfaceName, fieldName),
     )
     .map(([name]) => ({ typeName: name }));
 }

@@ -91,24 +91,61 @@ export function buildSchemaFromFiles(schemaFiles: readonly SchemaFileContent[]):
 }
 
 /**
+ * Checks whether a GraphQL definition is an executable definition (operation or fragment).
+ *
+ * @postcondition Returns `true` for OperationDefinition and FragmentDefinition nodes.
+ */
+function isExecutableDefinition(definition: { readonly kind: string }): boolean {
+  return definition.kind === "OperationDefinition" || definition.kind === "FragmentDefinition";
+}
+
+/**
+ * Checks whether a tag name is a recognized GraphQL tag (`graphql` or `gql`).
+ *
+ * @postcondition Returns `true` if the tag name is `"graphql"` or `"gql"`.
+ */
+function isGraphqlTagName(tagName: string): tagName is "graphql" | "gql" {
+  return tagName === "graphql" || tagName === "gql";
+}
+
+/**
+ * Checks whether a file path has a GraphQL extension (`.graphql` or `.gql`).
+ *
+ * @postcondition Returns `true` if the path ends with `.graphql` or `.gql`.
+ */
+function isGraphqlFile(filePath: string): boolean {
+  return filePath.endsWith(".graphql") || filePath.endsWith(".gql");
+}
+
+/**
+ * Checks whether a file path has a JavaScript or TypeScript extension (`.ts`, `.tsx`, `.js`, `.jsx`).
+ *
+ * @postcondition Returns `true` if the path ends with `.ts`, `.tsx`, `.js`, or `.jsx`.
+ */
+function isJavaScriptOrTypeScriptFile(filePath: string): boolean {
+  return (
+    filePath.endsWith(".ts") ||
+    filePath.endsWith(".tsx") ||
+    filePath.endsWith(".js") ||
+    filePath.endsWith(".jsx")
+  );
+}
+
+/**
  * Partitions file paths into GraphQL files and TypeScript files.
  *
- * @postcondition Every input path appears in exactly one of the two arrays.
+ * Files that match neither extension are excluded.
+ *
+ * @postcondition Every returned path belongs to exactly one of the two arrays.
  */
 function partitionFiles(files: readonly string[]): {
   readonly graphqlFiles: readonly string[];
   readonly tsFiles: readonly string[];
 } {
-  const graphqlFiles: string[] = [];
-  const tsFiles: string[] = [];
-  for (const filePath of files) {
-    if (filePath.endsWith(".graphql") || filePath.endsWith(".gql")) {
-      graphqlFiles.push(filePath);
-    } else {
-      tsFiles.push(filePath);
-    }
-  }
-  return { graphqlFiles, tsFiles };
+  return {
+    graphqlFiles: files.filter(isGraphqlFile),
+    tsFiles: files.filter(isJavaScriptOrTypeScriptFile),
+  };
 }
 
 /**
@@ -127,11 +164,8 @@ function parseGraphqlFile(filePath: string): {
   const fileContent = fs.readFileSync(filePath, "utf-8");
   try {
     const document = parse(fileContent);
-    const hasOperationsOrFragments = document.definitions.some(
-      (definition) =>
-        definition.kind === "OperationDefinition" || definition.kind === "FragmentDefinition",
-    );
-    if (!hasOperationsOrFragments) return { query: null, warning: null };
+    const hasExecutableDefinitions = document.definitions.some(isExecutableDefinition);
+    if (!hasExecutableDefinitions) return { query: null, warning: null };
     return {
       query: {
         filePath: toFilePath(filePath),
@@ -166,7 +200,7 @@ function filterGraphqlTags(
 ): readonly GraphqlTaggedTemplate[] {
   return taggedTemplates.flatMap((tagged) => {
     const rawTagText = tagged.getTag().getText();
-    if (rawTagText !== "graphql" && rawTagText !== "gql") return [];
+    if (!isGraphqlTagName(rawTagText)) return [];
     return [{ tagged, tagName: rawTagText }];
   });
 }
