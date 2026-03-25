@@ -18,14 +18,9 @@ import type {
   FieldName,
   FragmentName,
   FilePath,
+  RenameResult,
 } from "../types/domain";
 import { applyReplacements } from "./text-replace";
-
-/** Result of renaming in documents: changes for display and file updates for writing. */
-interface DocumentRenameResult {
-  readonly changes: readonly DocumentChange[];
-  readonly fileUpdates: readonly FileUpdate[];
-}
 
 /** A query paired with the text replacements to apply to it. */
 interface QueryReplacements {
@@ -137,7 +132,7 @@ function groupByFile(
     changes: DocumentChange[];
     replacements: TextReplacement[];
   },
-): DocumentRenameResult {
+): RenameResult {
   const collected: readonly QueryCollectedResult[] = queries.map((query) => ({
     query,
     ...collectReplacements(query),
@@ -165,7 +160,7 @@ export function renameTypeInDocuments(
   schema: GraphQLSchema,
   oldName: TypeName,
   newName: TypeName,
-): DocumentRenameResult {
+): RenameResult {
   return groupByFile(queries, (query) => {
     const typeInfo = new TypeInfo(schema);
     const changes: DocumentChange[] = [];
@@ -256,7 +251,7 @@ export function renameFieldInDocuments(
   oldFieldName: FieldName,
   newFieldName: FieldName,
   additionalTypes: readonly TypeName[] = [],
-): DocumentRenameResult {
+): RenameResult {
   const targetTypes = new Set<string>([typeName, ...additionalTypes]);
 
   return groupByFile(queries, (query) => {
@@ -310,7 +305,7 @@ export function renameFragmentInDocuments(
   queries: readonly EmbeddedQueryContent[],
   oldName: FragmentName,
   newName: FragmentName,
-): DocumentRenameResult {
+): RenameResult {
   return groupByFile(queries, (query) => {
     const changes: DocumentChange[] = [];
     const replacements: TextReplacement[] = [];

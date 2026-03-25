@@ -180,19 +180,34 @@ export interface FileUpdate {
 }
 
 // ---------------------------------------------------------------------------
+// Rename result
+// ---------------------------------------------------------------------------
+
+/**
+ * The result of a single rename pass (schema-only or document-only).
+ * Contains changes for display and file updates for writing.
+ *
+ * @invariant `fileUpdates` only contains entries for files that actually changed.
+ * @invariant `changes` is a flat list of all individual rename occurrences.
+ */
+export interface RenameResult {
+  readonly changes: readonly Change[];
+  readonly fileUpdates: readonly FileUpdate[];
+}
+
+// ---------------------------------------------------------------------------
 // RenamePlan
 // ---------------------------------------------------------------------------
 
 /**
  * The complete plan produced by the pure rename pipeline.
+ * Extends {@link RenameResult} with non-fatal warnings.
  *
  * @invariant `fileUpdates` contains the final file content for every file that has changes.
  * @invariant `changes` is a flat list of all individual rename occurrences (for display).
  * @invariant `warnings` are non-fatal messages (e.g. unparseable files).
  */
-export interface RenamePlan {
-  readonly changes: readonly Change[];
-  readonly fileUpdates: readonly FileUpdate[];
+export interface RenamePlan extends RenameResult {
   readonly warnings: readonly string[];
 }
 

@@ -13,6 +13,7 @@ import type {
   RenameCommand,
   RenameContext,
   RenamePlan,
+  RenameResult,
   ValidationError,
   InterfaceDecision,
   TypeName,
@@ -78,12 +79,7 @@ function computeRenameTypePlan(
     command.newName,
   );
 
-  return ok(
-    mergeRenamePlans(
-      { changes: schemaResult.changes, fileUpdates: schemaResult.fileUpdates, warnings: [] },
-      { changes: documentResult.changes, fileUpdates: documentResult.fileUpdates, warnings: [] },
-    ),
-  );
+  return ok(mergeRenameResults(schemaResult, documentResult));
 }
 
 /**
@@ -124,12 +120,7 @@ function computeRenameFieldPlan(
     additionalTypes,
   );
 
-  return ok(
-    mergeRenamePlans(
-      { changes: schemaResult.changes, fileUpdates: schemaResult.fileUpdates, warnings: [] },
-      { changes: documentResult.changes, fileUpdates: documentResult.fileUpdates, warnings: [] },
-    ),
-  );
+  return ok(mergeRenameResults(schemaResult, documentResult));
 }
 
 /**
@@ -151,23 +142,19 @@ function computeRenameFragmentPlan(
     command.newName,
   );
 
-  return ok({
-    changes: documentResult.changes,
-    fileUpdates: documentResult.fileUpdates,
-    warnings: [],
-  });
+  return ok({ ...documentResult, warnings: [] });
 }
 
 /**
- * Merges multiple RenamePlans into a single plan by concatenating all fields.
+ * Merges multiple RenameResults into a single RenamePlan with empty warnings.
  *
- * @postcondition The returned plan contains all changes, fileUpdates, and warnings
- *                from all input plans, in order.
+ * @postcondition The returned plan contains all changes and fileUpdates
+ *                from all input results, in order.
  */
-function mergeRenamePlans(...plans: readonly RenamePlan[]): RenamePlan {
+function mergeRenameResults(...results: readonly RenameResult[]): RenamePlan {
   return {
-    changes: plans.flatMap((plan) => plan.changes),
-    fileUpdates: plans.flatMap((plan) => plan.fileUpdates),
-    warnings: plans.flatMap((plan) => plan.warnings),
+    changes: results.flatMap((result) => result.changes),
+    fileUpdates: results.flatMap((result) => result.fileUpdates),
+    warnings: [],
   };
 }

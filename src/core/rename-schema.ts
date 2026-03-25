@@ -16,14 +16,9 @@ import type {
   FileUpdate,
   TypeName,
   FieldName,
+  RenameResult,
 } from "../types/domain";
 import { applyReplacements } from "./text-replace";
-
-/** Collected changes and text replacements for a single schema file. */
-interface SchemaRenameResult {
-  readonly changes: readonly SchemaChange[];
-  readonly fileUpdates: readonly FileUpdate[];
-}
 
 /** Intermediate result from visiting a single file's AST. */
 interface CollectedReplacements {
@@ -67,7 +62,7 @@ function buildSchemaFileUpdate(
 function renameInSchemaFiles(
   schemaFiles: readonly SchemaFileContent[],
   collectReplacements: (file: SchemaFileContent) => CollectedReplacements,
-): SchemaRenameResult {
+): RenameResult {
   const collected: readonly FileCollectedReplacements[] = schemaFiles.map((file) => ({
     file,
     ...collectReplacements(file),
@@ -127,7 +122,7 @@ export function renameTypeInSchema(
   schemaFiles: readonly SchemaFileContent[],
   oldName: TypeName,
   newName: TypeName,
-): SchemaRenameResult {
+): RenameResult {
   return renameInSchemaFiles(schemaFiles, (file) => {
     const changes: SchemaChange[] = [];
     const replacements: TextReplacement[] = [];
@@ -196,7 +191,7 @@ export function renameFieldInSchema(
   oldFieldName: FieldName,
   newFieldName: FieldName,
   additionalTypes: readonly TypeName[] = [],
-): SchemaRenameResult {
+): RenameResult {
   const targetTypes = new Set<string>([typeName, ...additionalTypes]);
 
   return renameInSchemaFiles(schemaFiles, (file) => {
