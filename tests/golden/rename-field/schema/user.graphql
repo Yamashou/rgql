@@ -1,0 +1,17 @@
+type Query {
+  user(id: ID!): User
+  users: [User!]!
+}
+
+type User {
+  id: ID!
+  fullName: String!
+  lastName: String!
+  email: String!
+}
+
+type Product {
+  id: ID!
+  firstName: String!
+  price: Float!
+}

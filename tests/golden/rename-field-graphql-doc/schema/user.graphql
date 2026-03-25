@@ -1,0 +1,28 @@
+type Query {
+  user(id: ID!): User
+}
+
+type Mutation {
+  updateUser(input: UpdateUserInput!): User
+}
+
+input UpdateUserInput {
+  firstName: String
+  lastName: String
+}
+
+type User {
+  id: ID!
+  """
+  ユーザーの名前
+  """
+  fullName: String!
+  lastName: String!
+  email: String!
+}
+
+type Product {
+  id: ID!
+  firstName: String!
+  price: Float!
+}

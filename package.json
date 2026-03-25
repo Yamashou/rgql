@@ -1,0 +1,31 @@
+{
+  "name": "rgql",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "bun run index.ts",
+    "test": "bun test",
+    "test:update-golden": "UPDATE_GOLDEN=1 bun test tests/golden.test.ts",
+    "build": "bun build index.ts --compile --outfile rgql",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint src/ tests/",
+    "fmt": "oxfmt --write src/ tests/ index.ts",
+    "fmt:check": "oxfmt --check src/ tests/ index.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^25.5.0",
+    "oxlint": "^1.57.0"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "chalk": "^5.6.2",
+    "commander": "^14.0.3",
+    "graphql": "^16.13.2",
+    "graphql-config": "^5.1.6",
+    "ts-morph": "^27.0.2"
+  }
+}

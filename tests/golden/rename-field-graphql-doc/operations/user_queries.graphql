@@ -1,0 +1,16 @@
+# User queries
+query GetUser($id: ID!) {
+  user(id: $id) {
+    id
+    fullName
+    lastName
+  }
+}
+
+# User mutations
+mutation UpdateUser($input: UpdateUserInput!) {
+  updateUser(input: $input) {
+    id
+    fullName
+  }
+}

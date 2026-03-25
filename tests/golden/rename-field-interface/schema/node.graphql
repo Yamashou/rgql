@@ -1,0 +1,21 @@
+type Query {
+  node(id: ID!): Node
+}
+
+interface Node {
+  id: ID!
+  fullName: String!
+}
+
+type User implements Node {
+  id: ID!
+  fullName: String!
+  lastName: String!
+  email: String!
+}
+
+type Admin implements Node {
+  id: ID!
+  fullName: String!
+  role: String!
+}
