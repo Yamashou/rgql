@@ -91,6 +91,184 @@ export function buildSchemaFromFiles(schemaFiles: readonly SchemaFileContent[]):
 }
 
 /**
+ * Partitions file paths into GraphQL files and TypeScript files.
+ *
+ * @postcondition Every input path appears in exactly one of the two arrays.
+ */
+function partitionFiles(files: readonly string[]): {
+  readonly graphqlFiles: readonly string[];
+  readonly tsFiles: readonly string[];
+} {
+  const graphqlFiles: string[] = [];
+  const tsFiles: string[] = [];
+  for (const filePath of files) {
+    if (filePath.endsWith(".graphql") || filePath.endsWith(".gql")) {
+      graphqlFiles.push(filePath);
+    } else {
+      tsFiles.push(filePath);
+    }
+  }
+  return { graphqlFiles, tsFiles };
+}
+
+/**
+ * Parses a standalone `.graphql`/`.gql` file into an EmbeddedQueryContent.
+ *
+ * Returns `null` if the file contains only schema definitions (no operations or fragments),
+ * or if parsing fails (in which case a warning string is returned).
+ *
+ * @precondition `filePath` is an absolute path to a readable `.graphql`/`.gql` file.
+ * @postcondition On success, the returned query has `tagName === "file"` and `startOffset === 0`.
+ */
+function parseGraphqlFile(filePath: string): {
+  readonly query: EmbeddedQueryContent | null;
+  readonly warning: string | null;
+} {
+  const fileContent = fs.readFileSync(filePath, "utf-8");
+  try {
+    const document = parse(fileContent);
+    const hasOperationsOrFragments = document.definitions.some(
+      (definition) =>
+        definition.kind === "OperationDefinition" || definition.kind === "FragmentDefinition",
+    );
+    if (!hasOperationsOrFragments) return { query: null, warning: null };
+    return {
+      query: {
+        filePath: toFilePath(filePath),
+        fileContent,
+        queryContent: fileContent,
+        document,
+        startOffset: 0,
+        endOffset: fileContent.length,
+        line: 1,
+        tagName: "file",
+      },
+      warning: null,
+    };
+  } catch {
+    return { query: null, warning: `⚠️  Warning: Could not parse GraphQL document ${filePath}` };
+  }
+}
+
+/** A tagged template with a confirmed `graphql` or `gql` tag name. */
+interface GraphqlTaggedTemplate {
+  readonly tagged: import("ts-morph").TaggedTemplateExpression;
+  readonly tagName: "graphql" | "gql";
+}
+
+/**
+ * Filters tagged template expressions to only those with `graphql` or `gql` tags.
+ *
+ * @postcondition Every returned entry has `tagName` of `"graphql"` or `"gql"`.
+ */
+function filterGraphqlTags(
+  taggedTemplates: readonly import("ts-morph").TaggedTemplateExpression[],
+): readonly GraphqlTaggedTemplate[] {
+  return taggedTemplates.flatMap((tagged) => {
+    const rawTagText = tagged.getTag().getText();
+    if (rawTagText !== "graphql" && rawTagText !== "gql") return [];
+    return [{ tagged, tagName: rawTagText }];
+  });
+}
+
+/** The raw text and position info extracted from a tagged template literal. */
+interface ExtractedTemplate {
+  readonly queryText: string;
+  readonly startOffset: number;
+  readonly endOffset: number;
+  readonly line: number;
+  readonly tagName: "graphql" | "gql";
+}
+
+/**
+ * Extracts the template literal text and position from a GraphQL tagged template.
+ *
+ * @precondition `entry.tagName` is `"graphql"` or `"gql"`.
+ * @postcondition Returns the raw query text with position info, or `null` if the template
+ *                has interpolations (TemplateExpression).
+ */
+function extractTemplateText(entry: GraphqlTaggedTemplate): ExtractedTemplate | null {
+  const template = entry.tagged.getTemplate();
+  if (!template.isKind(SyntaxKind.NoSubstitutionTemplateLiteral)) return null;
+  return {
+    queryText: template.getLiteralValue(),
+    startOffset: template.getStart() + 1,
+    endOffset: template.getEnd() - 1,
+    line: template.getStartLineNumber(),
+    tagName: entry.tagName,
+  };
+}
+
+/** Result of attempting to parse a single tagged template expression. */
+type TaggedTemplateResult =
+  | { readonly kind: "query"; readonly query: EmbeddedQueryContent }
+  | { readonly kind: "warning"; readonly warning: string };
+
+/**
+ * Builds a TaggedTemplateResult from an extracted template and a parsed document.
+ *
+ * @precondition `template` contains valid position info within `fileContent`.
+ * @postcondition Returns `"query"` on successful parse, `"warning"` on parse failure.
+ */
+function buildTaggedTemplateResult(
+  template: ExtractedTemplate,
+  filePath: string,
+  fileContent: string,
+): TaggedTemplateResult {
+  try {
+    const document = parse(template.queryText);
+    return {
+      kind: "query",
+      query: {
+        filePath: toFilePath(filePath),
+        fileContent,
+        queryContent: template.queryText,
+        document,
+        startOffset: template.startOffset,
+        endOffset: template.endOffset,
+        line: template.line,
+        tagName: template.tagName,
+      },
+    };
+  } catch {
+    return {
+      kind: "warning",
+      warning: `⚠️  Warning: Could not parse GraphQL in ${filePath}:${template.line}`,
+    };
+  }
+}
+
+/**
+ * Extracts GraphQL queries from tagged template literals in a TypeScript file.
+ *
+ * Recognizes `graphql` and `gql` tags. Template expressions with interpolations
+ * are skipped. Parse failures produce warnings instead of errors.
+ *
+ * @precondition `filePath` is an absolute path to a readable TS/TSX file.
+ * @postcondition Each returned query has `tagName` of `"graphql"` or `"gql"`.
+ */
+function parseTaggedTemplatesInFile(
+  filePath: string,
+  project: Project,
+): { readonly queries: readonly EmbeddedQueryContent[]; readonly warnings: readonly string[] } {
+  const fileContent = fs.readFileSync(filePath, "utf-8");
+  const sourceFile = project.createSourceFile(filePath, fileContent, { overwrite: true });
+  const taggedTemplates = sourceFile.getDescendantsOfKind(SyntaxKind.TaggedTemplateExpression);
+
+  const results = filterGraphqlTags(taggedTemplates)
+    .flatMap((entry) => {
+      const template = extractTemplateText(entry);
+      return template ? [template] : [];
+    })
+    .map((template) => buildTaggedTemplateResult(template, filePath, fileContent));
+
+  return {
+    queries: results.flatMap((r) => (r.kind === "query" ? [r.query] : [])),
+    warnings: results.flatMap((r) => (r.kind === "warning" ? [r.warning] : [])),
+  };
+}
+
+/**
  * Loads GraphQL queries/mutations/fragments from source files.
  *
  * Supports two source types:
@@ -110,99 +288,29 @@ export async function loadEmbeddedQueries(
   rootDir: string,
 ): Promise<LoadQueriesResult> {
   const files = await globFiles(patterns, rootDir);
-  const queries: EmbeddedQueryContent[] = [];
-  const warnings: string[] = [];
+  const { graphqlFiles, tsFiles } = partitionFiles(files);
 
-  const graphqlFiles: string[] = [];
-  const tsFiles: string[] = [];
+  const graphqlResults = graphqlFiles.map(parseGraphqlFile);
+  const graphqlQueries = graphqlResults.flatMap((r) => (r.query ? [r.query] : []));
+  const graphqlWarnings = graphqlResults.flatMap((r) => (r.warning ? [r.warning] : []));
 
-  for (const filePath of files) {
-    if (filePath.endsWith(".graphql") || filePath.endsWith(".gql")) {
-      graphqlFiles.push(filePath);
-    } else {
-      tsFiles.push(filePath);
-    }
+  if (tsFiles.length === 0) {
+    return { queries: graphqlQueries, warnings: graphqlWarnings };
   }
 
-  for (const filePath of graphqlFiles) {
-    const fileContent = fs.readFileSync(filePath, "utf-8");
-    try {
-      const document = parse(fileContent);
-      const hasOperationsOrFragments = document.definitions.some(
-        (definition) =>
-          definition.kind === "OperationDefinition" || definition.kind === "FragmentDefinition",
-      );
-      if (hasOperationsOrFragments) {
-        queries.push({
-          filePath: toFilePath(filePath),
-          fileContent,
-          queryContent: fileContent,
-          document,
-          startOffset: 0,
-          endOffset: fileContent.length,
-          line: 1,
-          tagName: "file",
-        });
-      }
-    } catch {
-      warnings.push(`⚠️  Warning: Could not parse GraphQL document ${filePath}`);
-    }
-  }
+  const project = new Project({
+    compilerOptions: { allowJs: true },
+    skipAddingFilesFromTsConfig: true,
+  });
 
-  if (tsFiles.length > 0) {
-    const project = new Project({
-      compilerOptions: { allowJs: true },
-      skipAddingFilesFromTsConfig: true,
-    });
+  const tsResults = tsFiles.map((filePath) => parseTaggedTemplatesInFile(filePath, project));
+  const tsQueries = tsResults.flatMap((r) => r.queries);
+  const tsWarnings = tsResults.flatMap((r) => r.warnings);
 
-    for (const filePath of tsFiles) {
-      const fileContent = fs.readFileSync(filePath, "utf-8");
-      const sourceFile = project.createSourceFile(filePath, fileContent, {
-        overwrite: true,
-      });
-
-      const taggedTemplates = sourceFile.getDescendantsOfKind(SyntaxKind.TaggedTemplateExpression);
-
-      for (const tagged of taggedTemplates) {
-        const tag = tagged.getTag();
-        const rawTagText = tag.getText();
-
-        if (rawTagText !== "graphql" && rawTagText !== "gql") continue;
-        const tagText: "graphql" | "gql" = rawTagText;
-
-        const template = tagged.getTemplate();
-        let queryText: string;
-
-        if (template.isKind(SyntaxKind.NoSubstitutionTemplateLiteral)) {
-          queryText = template.getLiteralValue();
-        } else if (template.isKind(SyntaxKind.TemplateExpression)) {
-          continue;
-        } else {
-          continue;
-        }
-
-        try {
-          const document = parse(queryText);
-          queries.push({
-            filePath: toFilePath(filePath),
-            fileContent,
-            queryContent: queryText,
-            document,
-            startOffset: template.getStart() + 1,
-            endOffset: template.getEnd() - 1,
-            line: template.getStartLineNumber(),
-            tagName: tagText,
-          });
-        } catch {
-          warnings.push(
-            `⚠️  Warning: Could not parse GraphQL in ${filePath}:${template.getStartLineNumber()}`,
-          );
-        }
-      }
-    }
-  }
-
-  return { queries, warnings };
+  return {
+    queries: [...graphqlQueries, ...tsQueries],
+    warnings: [...graphqlWarnings, ...tsWarnings],
+  };
 }
 
 /**

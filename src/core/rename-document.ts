@@ -34,11 +34,51 @@ interface QueryReplacements {
 }
 
 /**
- * Builds final file updates from grouped query replacements.
+ * Translates query-local replacement offsets to file-absolute offsets.
  *
- * For embedded queries (`tagName !== "file"`), translates query-local offsets to
- * file-absolute offsets by adding `startOffset`. For standalone `.graphql` files
- * (`tagName === "file"`), offsets are already absolute.
+ * For standalone `.graphql` files (`tagName === "file"`), offsets are already absolute
+ * and returned unchanged. For embedded queries, `startOffset` is added to each replacement.
+ *
+ * @precondition Each replacement's offsets are valid within the query content.
+ * @postcondition Returned replacements have file-absolute offsets.
+ */
+function toAbsoluteReplacements(
+  query: EmbeddedQueryContent,
+  replacements: readonly TextReplacement[],
+): readonly TextReplacement[] {
+  if (query.tagName === "file") return replacements;
+  return replacements.map((replacement) => ({
+    start: query.startOffset + replacement.start,
+    end: query.startOffset + replacement.end,
+    newText: replacement.newText,
+  }));
+}
+
+/**
+ * Builds a single FileUpdate by collecting and applying all replacements for a file.
+ *
+ * @precondition `queryReplacementsList` has at least one entry.
+ * @postcondition Returns a FileUpdate with all replacements applied, or `null` if the list is empty.
+ */
+function buildFileUpdate(
+  filePath: FilePath,
+  queryReplacementsList: readonly QueryReplacements[],
+): FileUpdate | null {
+  const firstEntry = queryReplacementsList[0];
+  if (!firstEntry) return null;
+
+  const allReplacements = queryReplacementsList.flatMap(({ query, replacements }) =>
+    toAbsoluteReplacements(query, replacements),
+  );
+
+  return {
+    filePath,
+    content: applyReplacements(firstEntry.query.fileContent, allReplacements),
+  };
+}
+
+/**
+ * Builds final file updates from grouped query replacements.
  *
  * @precondition Each file in the map has at least one entry.
  * @postcondition Each returned FileUpdate contains the full file content with all
@@ -47,39 +87,43 @@ interface QueryReplacements {
 function buildFileUpdates(
   queryReplacementsByFile: Map<FilePath, readonly QueryReplacements[]>,
 ): readonly FileUpdate[] {
-  const fileUpdates: FileUpdate[] = [];
+  return [...queryReplacementsByFile.entries()].flatMap(([filePath, queryReplacementsList]) => {
+    const update = buildFileUpdate(filePath, queryReplacementsList);
+    return update ? [update] : [];
+  });
+}
 
-  for (const [filePath, queryReplacementsList] of queryReplacementsByFile) {
-    const allReplacements: TextReplacement[] = [];
-
-    for (const { query, replacements } of queryReplacementsList) {
-      for (const replacement of replacements) {
-        if (query.tagName === "file") {
-          allReplacements.push(replacement);
-        } else {
-          allReplacements.push({
-            start: query.startOffset + replacement.start,
-            end: query.startOffset + replacement.end,
-            newText: replacement.newText,
-          });
-        }
-      }
-    }
-
-    const firstEntry = queryReplacementsList[0];
-    if (!firstEntry) continue;
-    const fileContent = firstEntry.query.fileContent;
-    fileUpdates.push({
-      filePath,
-      content: applyReplacements(fileContent, allReplacements),
-    });
-  }
-
-  return fileUpdates;
+/** A query paired with its collected changes and replacements. */
+interface QueryCollectedResult {
+  readonly query: EmbeddedQueryContent;
+  readonly changes: readonly DocumentChange[];
+  readonly replacements: readonly TextReplacement[];
 }
 
 /**
- * Higher-order function that groups queries by file path, collects replacements, and builds updates.
+ * Groups query results by file path into a Map of QueryReplacements.
+ *
+ * @precondition Each entry has non-empty `replacements`.
+ * @postcondition Each key in the returned map has at least one QueryReplacements entry.
+ */
+function groupResultsByFile(
+  results: readonly QueryCollectedResult[],
+): Map<FilePath, QueryReplacements[]> {
+  const groups = new Map<FilePath, QueryReplacements[]>();
+  for (const { query, replacements } of results) {
+    const existing = groups.get(query.filePath);
+    const entry: QueryReplacements = { query, replacements };
+    if (existing) {
+      existing.push(entry);
+    } else {
+      groups.set(query.filePath, [entry]);
+    }
+  }
+  return groups;
+}
+
+/**
+ * Higher-order function that collects replacements from each query, groups by file, and builds updates.
  *
  * @precondition `queries` contains parsed documents.
  * @postcondition Only files with actual replacements appear in `fileUpdates`.
@@ -94,26 +138,16 @@ function groupByFile(
     replacements: TextReplacement[];
   },
 ): DocumentRenameResult {
-  const allChanges: DocumentChange[] = [];
-  const queryReplacementsByFile = new Map<FilePath, QueryReplacements[]>();
+  const collected: readonly QueryCollectedResult[] = queries.map((query) => ({
+    query,
+    ...collectReplacements(query),
+  }));
 
-  for (const query of queries) {
-    const { changes, replacements } = collectReplacements(query);
-    if (replacements.length === 0) continue;
-
-    allChanges.push(...changes);
-
-    const existing = queryReplacementsByFile.get(query.filePath);
-    if (existing) {
-      existing.push({ query, replacements });
-    } else {
-      queryReplacementsByFile.set(query.filePath, [{ query, replacements }]);
-    }
-  }
+  const withReplacements = collected.filter((c) => c.replacements.length > 0);
 
   return {
-    changes: allChanges,
-    fileUpdates: buildFileUpdates(queryReplacementsByFile),
+    changes: withReplacements.flatMap((c) => c.changes),
+    fileUpdates: buildFileUpdates(groupResultsByFile(withReplacements)),
   };
 }
 

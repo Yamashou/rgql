@@ -31,6 +31,30 @@ interface CollectedReplacements {
   readonly replacements: TextReplacement[];
 }
 
+/** A schema file paired with its collected changes and replacements. */
+interface FileCollectedReplacements {
+  readonly file: SchemaFileContent;
+  readonly changes: readonly SchemaChange[];
+  readonly replacements: readonly TextReplacement[];
+}
+
+/**
+ * Builds a FileUpdate from a schema file and its collected replacements.
+ *
+ * @precondition `replacements` are valid offsets within `file.content`.
+ * @postcondition Returns a FileUpdate with all replacements applied, or `null` if there are none.
+ */
+function buildSchemaFileUpdate(
+  file: SchemaFileContent,
+  replacements: readonly TextReplacement[],
+): FileUpdate | null {
+  if (replacements.length === 0) return null;
+  return {
+    filePath: file.filePath,
+    content: applyReplacements(file.content, replacements),
+  };
+}
+
 /**
  * Higher-order function that applies a replacement collector to each schema file.
  *
@@ -44,21 +68,18 @@ function renameInSchemaFiles(
   schemaFiles: readonly SchemaFileContent[],
   collectReplacements: (file: SchemaFileContent) => CollectedReplacements,
 ): SchemaRenameResult {
-  const allChanges: SchemaChange[] = [];
-  const fileUpdates: FileUpdate[] = [];
+  const collected: readonly FileCollectedReplacements[] = schemaFiles.map((file) => ({
+    file,
+    ...collectReplacements(file),
+  }));
 
-  for (const file of schemaFiles) {
-    const { changes, replacements } = collectReplacements(file);
-    allChanges.push(...changes);
-    if (replacements.length > 0) {
-      fileUpdates.push({
-        filePath: file.filePath,
-        content: applyReplacements(file.content, replacements),
-      });
-    }
-  }
-
-  return { changes: allChanges, fileUpdates };
+  return {
+    changes: collected.flatMap((c) => c.changes),
+    fileUpdates: collected.flatMap((c) => {
+      const update = buildSchemaFileUpdate(c.file, c.replacements);
+      return update ? [update] : [];
+    }),
+  };
 }
 
 /** All GraphQL AST node kinds that define or extend a named type. */
